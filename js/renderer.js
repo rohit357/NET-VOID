@@ -139,7 +139,7 @@ export class Renderer {
       const node = this.state.nodes[i];
       const dx = wx - node.x;
       const dy = wy - node.y;
-      const r = this.getNodeRadius(node);
+      const r = this.getNodeRadius(node) + 8; // increase clickable area
       if (dx * dx + dy * dy < r * r) return node;
     }
     return null;

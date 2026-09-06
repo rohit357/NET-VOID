@@ -1,7 +1,7 @@
 // VOIDNET — main entry point
-import { State } from './state.js';
-import { Renderer } from './renderer.js';
-import { UI } from './ui.js';
+import { State } from './state.js?v=1.1';
+import { Renderer } from './renderer.js?v=1.1';
+import { UI } from './ui.js?v=1.1';
 
 const canvas = document.getElementById('net-canvas');
 const ctx = canvas.getContext('2d');

@@ -467,6 +467,53 @@ export class State {
     }
   }
 
+  failNode(id) {
+    const node = this.getNode(id);
+    if (!node || node.status === 'failed') return;
+
+    node.status = 'failed';
+    node.restartTimer = 0;
+    node.overloadTimer = 0;
+
+    // drop in-flight requests traversing this node
+    for (let i = this.requests.length - 1; i >= 0; i--) {
+      const req = this.requests[i];
+      if (req.route.includes(id)) {
+        req.status = 'dropped';
+        req.endTime = Date.now();
+        this.logRequest(req);
+        this.requests.splice(i, 1);
+        this.stats.rpsCounter++;
+      }
+    }
+
+    this.log('error', `${node.name} forced to fail`);
+    this.updateStats();
+  }
+
+  pingNode(sourceId) {
+    const source = this.getNode(sourceId);
+    if (!source) return null;
+    if (source.status === 'failed') {
+      this.log('warn', `cannot ping from ${source.name} (node is failed)`);
+      return null;
+    }
+
+    const candidates = this.nodes.filter(n => n.id !== sourceId && n.status !== 'failed');
+    if (candidates.length === 0) {
+      this.log('warn', `no other online nodes to ping`);
+      return null;
+    }
+
+    // prefer reachable nodes
+    const reachable = candidates.filter(t => this.findPath(sourceId, t.id) !== null);
+    const target = reachable.length > 0
+      ? reachable[Math.floor(Math.random() * reachable.length)]
+      : candidates[Math.floor(Math.random() * candidates.length)];
+
+    return this.sendRequest(sourceId, target.id);
+  }
+
   restartNode(id) {
     const node = this.getNode(id);
     if (!node || node.status === 'restarting') return;

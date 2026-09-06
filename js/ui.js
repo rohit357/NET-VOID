@@ -13,6 +13,13 @@ export class UI {
     this.repulsion = 0;
     this.floatEnabled = true;
 
+    // inspector & telemetry tracking
+    this.inspectedNodeId = null;
+    this.lastRenderedStatus = null;
+    this.lastRenderedLinksHash = '';
+    this.lastConsoleEventsCount = 0;
+    this.lastRequestLogCount = 0;
+
     this.setupControls();
     this.setupInspector();
     this.setupConsole();
@@ -98,17 +105,27 @@ export class UI {
 
         document.getElementById('filters-console').classList.toggle('hidden', target !== 'console');
         document.getElementById('filters-requests').classList.toggle('hidden', target !== 'requests');
+
+        if (target === 'console') {
+          this.lastConsoleEventsCount = -1;
+          this.renderConsole();
+        } else if (target === 'requests') {
+          this.lastRequestLogCount = -1;
+          this.renderRequestLog();
+        }
       });
     });
 
     // console filters
     document.getElementById('console-level').addEventListener('change', e => {
       this.consoleFilter = e.target.value;
+      this.lastConsoleEventsCount = -1;
       this.renderConsole();
     });
 
     document.getElementById('console-clear').addEventListener('click', () => {
       this.state.events = [];
+      this.lastConsoleEventsCount = 0;
       this.renderConsole();
     });
 
@@ -130,16 +147,81 @@ export class UI {
     // request filters
     document.getElementById('req-search').addEventListener('input', e => {
       this.reqFilter.search = e.target.value.toLowerCase();
+      this.lastRequestLogCount = -1;
       this.renderRequestLog();
     });
 
     document.getElementById('req-status').addEventListener('change', e => {
       this.reqFilter.status = e.target.value;
+      this.lastRequestLogCount = -1;
       this.renderRequestLog();
     });
   }
 
   setupInspector() {
+    const body = document.getElementById('inspector-body');
+
+    body.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn || btn.disabled) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const action = btn.dataset.action;
+      const node = this.renderer.selectedNode;
+
+      if (!node) return;
+
+      if (action === 'restart') {
+        if (typeof this.state.restartNode === 'function') {
+          this.state.restartNode(node.id);
+        } else {
+          node.status = 'online';
+          this.state.log('ok', `${node.name} restarted`);
+        }
+        this.updateInspectorButtons(node);
+        this.updateInspectorTelemetry(node);
+      } else if (action === 'fail') {
+        if (typeof this.state.failNode === 'function') {
+          this.state.failNode(node.id);
+        } else {
+          node.status = 'failed';
+          this.state.log('error', `${node.name} forced to fail`);
+          if (typeof this.state.updateStats === 'function') this.state.updateStats();
+        }
+        this.updateInspectorButtons(node);
+        this.updateInspectorTelemetry(node);
+      } else if (action === 'ping') {
+        if (node.status === 'failed') {
+          this.state.log('warn', `Cannot ping from ${node.name} (node is failed)`);
+          return;
+        }
+        let req = null;
+        if (typeof this.state.pingNode === 'function') {
+          req = this.state.pingNode(node.id);
+        } else {
+          const others = this.state.nodes.filter(n => n.id !== node.id && n.status !== 'failed');
+          if (others.length > 0) {
+            const target = others[Math.floor(Math.random() * others.length)];
+            req = this.state.sendRequest(node.id, target.id);
+          }
+        }
+        if (req) {
+          btn.style.filter = 'brightness(1.4)';
+          setTimeout(() => { btn.style.filter = ''; }, 200);
+        }
+      } else if (action === 'delete') {
+        const id = node.id;
+        this.renderer.selectedNode = null;
+        if (this.renderer.hoveredNode?.id === id) {
+          this.renderer.hoveredNode = null;
+        }
+        this.state.deleteNode(id);
+        this.renderInspector(null);
+      }
+    });
+
     window.addEventListener('nodeSelected', e => {
       const node = e.detail;
       this.renderer.selectedNode = node;
@@ -186,15 +268,60 @@ export class UI {
     document.getElementById('mode-hint').textContent = hints[mode] || '';
   }
 
+  getActionButtonsHTML(node) {
+    let toggleBtn = '';
+    if (node.status === 'failed') {
+      toggleBtn = '<button class="btn btn-good" data-action="restart" title="Restart this node">Restart</button>';
+    } else if (node.status === 'restarting') {
+      toggleBtn = '<button class="btn btn-good" data-action="restart" disabled style="opacity:0.6;cursor:not-allowed;" title="Node is restarting…">Restarting…</button>';
+    } else {
+      toggleBtn = '<button class="btn btn-danger" data-action="fail" title="Force fail this node">Force fail</button>';
+    }
+
+    const pingDisabled = (node.status === 'failed' || node.status === 'restarting')
+      ? 'disabled style="opacity:0.5;cursor:not-allowed;" title="Node is not online"'
+      : 'title="Send ping request to an online node"';
+
+    return `
+      ${toggleBtn}
+      <button class="btn" data-action="ping" ${pingDisabled}>Send ping</button>
+      <button class="btn btn-danger" data-action="delete" title="Delete this node">Delete</button>
+    `;
+  }
+
+  updateInspectorButtons(node) {
+    const actionsEl = document.getElementById('insp-actions');
+    if (actionsEl && node) {
+      actionsEl.innerHTML = this.getActionButtonsHTML(node);
+    }
+  }
+
+  getLinksHTML(node) {
+    const links = this.state.links.filter(l => l.source === node.id || l.target === node.id);
+    if (links.length === 0) return '';
+    const linkRows = links.map(l => {
+      const other = this.state.getNode(l.source === node.id ? l.target : l.source);
+      if (!other) return '';
+      return `<div class="insp-link-row"><span>${other.name}</span><span class="lat">${l.latency.toFixed(0)}ms</span></div>`;
+    }).join('');
+    return `<h3>Links (${links.length})</h3>${linkRows}`;
+  }
+
   renderInspector(node) {
     const body = document.getElementById('inspector-body');
+    if (!body) return;
 
     if (!node) {
+      this.inspectedNodeId = null;
+      this.lastRenderedStatus = null;
+      this.lastRenderedLinksHash = '';
       body.className = 'inspector-empty';
       body.innerHTML = 'No node selected.';
       return;
     }
 
+    this.inspectedNodeId = node.id;
+    this.lastRenderedStatus = node.status;
     body.className = '';
 
     const statusMap = {
@@ -207,11 +334,7 @@ export class UI {
     const st = statusMap[node.status] || statusMap.online;
 
     const links = this.state.links.filter(l => l.source === node.id || l.target === node.id);
-    const linkRows = links.map(l => {
-      const other = this.state.getNode(l.source === node.id ? l.target : l.source);
-      if (!other) return '';
-      return `<div class="insp-link-row"><span>${other.name}</span><span class="lat">${l.latency.toFixed(0)}ms</span></div>`;
-    }).join('');
+    this.lastRenderedLinksHash = links.map(l => `${l.source}-${l.target}-${l.latency.toFixed(0)}`).join('|');
 
     body.innerHTML = `
       <div class="insp-head">
@@ -221,43 +344,59 @@ export class UI {
           <div class="insp-type">${node.type}</div>
         </div>
       </div>
-      <div class="insp-status ${st.cls}"><span class="st-icon">${st.icon}</span>${st.label}</div>
+      <div class="insp-status ${st.cls}" id="insp-status-badge"><span class="st-icon">${st.icon}</span><span class="st-label">${st.label}</span></div>
       <div class="insp-rows">
-        <div class="insp-row"><span class="k">load</span><span class="v">${node.load.toFixed(0)}%</span></div>
-        <div class="insp-row"><span class="k">uptime</span><span class="v">${node.uptime.toFixed(1)}%</span></div>
+        <div class="insp-row"><span class="k">load</span><span class="v" id="insp-load-val">${node.load.toFixed(0)}%</span></div>
+        <div class="insp-row"><span class="k">uptime</span><span class="v" id="insp-uptime-val">${node.uptime.toFixed(1)}%</span></div>
       </div>
-      <div class="load-bar"><div style="width:${node.load}%"></div></div>
-      <div class="insp-actions">
-        ${node.status === 'failed' ? '<button class="btn btn-good" data-action="restart">Restart</button>' : ''}
-        ${node.status !== 'failed' ? '<button class="btn btn-danger" data-action="fail">Force fail</button>' : ''}
-        <button class="btn" data-action="ping">Send ping</button>
-        <button class="btn btn-danger" data-action="delete">Delete</button>
+      <div class="load-bar"><div id="insp-load-fill" style="width:${Math.min(100, Math.max(0, node.load))}%"></div></div>
+      <div class="insp-actions" id="insp-actions">
+        ${this.getActionButtonsHTML(node)}
       </div>
-      ${linkRows ? `<div class="insp-links"><h3>Links (${links.length})</h3>${linkRows}</div>` : ''}
+      <div class="insp-links" id="insp-links">
+        ${this.getLinksHTML(node)}
+      </div>
     `;
+  }
 
-    // action buttons
-    body.querySelectorAll('[data-action]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const action = btn.dataset.action;
-        if (action === 'restart') {
-          this.state.restartNode(node.id);
-        } else if (action === 'fail') {
-          node.status = 'failed';
-          this.state.log('error', `${node.name} forced to fail`);
-        } else if (action === 'ping') {
-          const others = this.state.nodes.filter(n => n.id !== node.id && n.status !== 'failed');
-          if (others.length > 0) {
-            const target = others[Math.floor(Math.random() * others.length)];
-            this.state.sendRequest(node.id, target.id);
-          }
-        } else if (action === 'delete') {
-          this.state.deleteNode(node.id);
-          this.renderer.selectedNode = null;
-          this.renderInspector(null);
-        }
-      });
-    });
+  updateInspectorTelemetry(node) {
+    const statusBadge = document.getElementById('insp-status-badge');
+    const loadVal = document.getElementById('insp-load-val');
+    const uptimeVal = document.getElementById('insp-uptime-val');
+    const loadFill = document.getElementById('insp-load-fill');
+    const linksEl = document.getElementById('insp-links');
+
+    if (loadVal) loadVal.textContent = `${node.load.toFixed(0)}%`;
+    if (uptimeVal) uptimeVal.textContent = `${node.uptime.toFixed(1)}%`;
+    if (loadFill) loadFill.style.width = `${Math.min(100, Math.max(0, node.load))}%`;
+
+    // update status badge & action buttons only when status changes
+    if (node.status !== this.lastRenderedStatus) {
+      this.lastRenderedStatus = node.status;
+      const statusMap = {
+        online: { label: 'Online', cls: 'st-online', icon: '●' },
+        overloaded: { label: 'Overloaded', cls: 'st-overloaded', icon: '⚠' },
+        degraded: { label: 'Degraded', cls: 'st-degraded', icon: '⚠' },
+        failed: { label: 'Failed', cls: 'st-failed', icon: '✕' },
+        restarting: { label: 'Restarting…', cls: 'st-restarting', icon: '↻' },
+      };
+      const st = statusMap[node.status] || statusMap.online;
+      if (statusBadge) {
+        statusBadge.className = `insp-status ${st.cls}`;
+        statusBadge.innerHTML = `<span class="st-icon">${st.icon}</span><span class="st-label">${st.label}</span>`;
+      }
+      this.updateInspectorButtons(node);
+    }
+
+    // update links only if links changed
+    const links = this.state.links.filter(l => l.source === node.id || l.target === node.id);
+    const linksHash = links.map(l => `${l.source}-${l.target}-${l.latency.toFixed(0)}`).join('|');
+    if (linksHash !== this.lastRenderedLinksHash) {
+      this.lastRenderedLinksHash = linksHash;
+      if (linksEl) {
+        linksEl.innerHTML = this.getLinksHTML(node);
+      }
+    }
   }
 
   renderConsole() {
@@ -343,16 +482,29 @@ export class UI {
     // sparkline
     this.renderSparkline();
 
-    // refresh console/log if active
-    if (this.currentTab === 'console' && this.state.events.length > 0) {
+    // refresh console/log only when counts change
+    if (this.currentTab === 'console' && this.state.events.length !== this.lastConsoleEventsCount) {
+      this.lastConsoleEventsCount = this.state.events.length;
       this.renderConsole();
-    } else if (this.currentTab === 'requests' && this.state.requestLog.length > 0) {
+    } else if (this.currentTab === 'requests' && this.state.requestLog.length !== this.lastRequestLogCount) {
+      this.lastRequestLogCount = this.state.requestLog.length;
       this.renderRequestLog();
     }
 
-    // refresh inspector if node selected
-    if (this.renderer.selectedNode) {
-      this.renderInspector(this.renderer.selectedNode);
+    // refresh inspector telemetry without destroying DOM
+    const selNode = this.renderer.selectedNode;
+    if (selNode) {
+      if (!this.state.getNode(selNode.id)) {
+        // node was deleted
+        this.renderer.selectedNode = null;
+        this.renderInspector(null);
+      } else if (this.inspectedNodeId !== selNode.id) {
+        this.renderInspector(selNode);
+      } else {
+        this.updateInspectorTelemetry(selNode);
+      }
+    } else if (this.inspectedNodeId !== null) {
+      this.renderInspector(null);
     }
   }
 
