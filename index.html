@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VOIDNET — network simulator</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <h1>VOIDNET</h1>
+      <span class="brand-sub">network simulator</span>
+    </div>
+    <div class="topbar-controls">
+      <label class="switch" title="Generate background traffic automatically">
+        <input type="checkbox" id="toggle-traffic" checked>
+        <span class="switch-track"></span>
+        <span class="switch-label">Auto traffic</span>
+      </label>
+      <div class="slider-group" title="Auto traffic rate (requests/sec)">
+        <span class="slider-label">rate</span>
+        <input type="range" id="traffic-rate" min="0" max="12" step="0.5" value="3">
+        <span class="slider-value" id="traffic-rate-value">3.0</span>
+      </div>
+      <div class="slider-group" title="Simulation speed">
+        <span class="slider-label">speed</span>
+        <input type="range" id="sim-speed" min="0.25" max="4" step="0.25" value="1">
+        <span class="slider-value" id="sim-speed-value">1×</span>
+      </div>
+      <label class="switch switch-chaos" title="Randomly inject latency spikes, packet loss, node failures and overloads">
+        <input type="checkbox" id="toggle-chaos">
+        <span class="switch-track"></span>
+        <span class="switch-label">Chaos mode</span>
+      </label>
+    </div>
+  </header>
+
+  <main id="workspace">
+
+    <aside id="sidebar-left">
+      <section class="panel">
+        <h2 class="panel-title">Tools</h2>
+        <div class="tool-grid" id="tool-grid">
+          <button class="tool-btn active" data-mode="select" title="Select / inspect nodes. Drag to move. Drag empty space to pan.">Select</button>
+          <button class="tool-btn" data-mode="connect" title="Click two nodes to link them">Connect</button>
+          <button class="tool-btn" data-mode="disconnect" title="Click a link to remove it">Disconnect</button>
+          <button class="tool-btn" data-mode="request" title="Click source node, then destination node">Send request</button>
+        </div>
+        <div class="spawn-row">
+          <select id="spawn-type">
+            <option value="server">Server</option>
+            <option value="website">Website</option>
+            <option value="api">API</option>
+            <option value="database">Database</option>
+            <option value="user">User</option>
+            <option value="network">Network</option>
+          </select>
+          <button id="spawn-btn" class="btn btn-primary" title="Spawn node (auto-connects to nearest network)">+ Spawn</button>
+        </div>
+        <div class="mode-hint" id="mode-hint">Click a node to inspect it.</div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Physics</h2>
+        <div class="slider-group-vert">
+          <label class="slider-label-row"><span>Float speed</span><span class="slider-value" id="float-speed-val">1.0</span></label>
+          <input type="range" id="float-speed" min="0" max="3" step="0.1" value="1.0">
+        </div>
+        <div class="slider-group-vert">
+          <label class="slider-label-row"><span>Repulsion</span><span class="slider-value" id="repulsion-val">0</span></label>
+          <input type="range" id="repulsion" min="0" max="100" step="5" value="0">
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-float" checked>
+          <span class="switch-track"></span>
+          <span class="switch-label">Enable floating</span>
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Topology &amp; health</h2>
+        <div class="stat-grid">
+          <div class="stat-tile"><div class="stat-value" id="stat-active">0</div><div class="stat-label">active nodes</div></div>
+          <div class="stat-tile"><div class="stat-value stat-bad" id="stat-failed">0</div><div class="stat-label">failed nodes</div></div>
+          <div class="stat-tile"><div class="stat-value" id="stat-rps">0.0</div><div class="stat-label">requests/sec</div></div>
+          <div class="stat-tile"><div class="stat-value" id="stat-latency">—</div><div class="stat-label">avg latency</div></div>
+          <div class="stat-tile"><div class="stat-value" id="stat-loss">0%</div><div class="stat-label">packet loss</div></div>
+          <div class="stat-tile"><div class="stat-value" id="stat-uptime">100%</div><div class="stat-label">availability</div></div>
+        </div>
+        <div class="spark-block">
+          <div class="spark-head"><span>Requests/sec — last 60s</span><span id="spark-now"></span></div>
+          <canvas id="sparkline" width="232" height="44"></canvas>
+        </div>
+        <div class="uptime-row">session <span id="stat-session">0:00</span> · links <span id="stat-links">0</span> · in flight <span id="stat-inflight">0</span></div>
+      </section>
+    </aside>
+
+    <section id="viewport">
+      <canvas id="net-canvas"></canvas>
+      <div id="viewport-overlay">
+        <div class="zoom-controls">
+          <button id="zoom-in" title="Zoom in">+</button>
+          <button id="zoom-out" title="Zoom out">−</button>
+          <button id="zoom-fit" title="Fit network">⤢</button>
+        </div>
+        <div id="chaos-banner" class="hidden">CHAOS MODE ACTIVE</div>
+      </div>
+    </section>
+
+    <aside id="sidebar-right">
+      <section class="panel" id="inspector">
+        <h2 class="panel-title">Inspector</h2>
+        <div id="inspector-body" class="inspector-empty">No node selected.</div>
+      </section>
+    </aside>
+
+  </main>
+
+  <footer id="bottom-panel">
+    <div class="tab-bar">
+      <button class="tab active" data-tab="console">Event console</button>
+      <button class="tab" data-tab="requests">Request log</button>
+      <div class="tab-filters" id="filters-console">
+        <select id="console-level">
+          <option value="all">all levels</option>
+          <option value="info">info</option>
+          <option value="ok">ok</option>
+          <option value="warn">warn</option>
+          <option value="error">error</option>
+          <option value="chaos">chaos</option>
+        </select>
+        <button id="console-clear" class="btn btn-ghost">clear</button>
+      </div>
+      <div class="tab-filters hidden" id="filters-requests">
+        <input type="text" id="req-search" placeholder="filter by node…">
+        <select id="req-status">
+          <option value="all">all statuses</option>
+          <option value="ok">ok</option>
+          <option value="in-flight">in-flight</option>
+          <option value="dropped">dropped</option>
+          <option value="timeout">timeout</option>
+          <option value="unroutable">unroutable</option>
+        </select>
+      </div>
+    </div>
+    <div class="tab-body" id="console-pane"><div id="console-list"></div></div>
+    <div class="tab-body hidden" id="requests-pane">
+      <table id="req-table">
+        <thead><tr><th>time</th><th>source</th><th>destination</th><th>route</th><th>latency</th><th>status</th></tr></thead>
+        <tbody id="req-tbody"></tbody>
+      </table>
+    </div>
+  </footer>
+
+  <!-- Welcome guide overlay -->
+  <div id="guide-overlay" class="guide-overlay">
+    <div class="guide-modal">
+      <div class="guide-header">
+        <h2>Welcome to VOIDNET</h2>
+        <button class="guide-close" id="guide-close">×</button>
+      </div>
+      <div class="guide-body">
+        <p class="guide-intro">Interactive network simulator — visualize and control a fictional internet topology in real time.</p>
+
+        <div class="guide-section">
+          <h3>What you can do</h3>
+          <ul>
+            <li><strong>Spawn nodes</strong> — Create servers, APIs, databases, websites, users, and networks</li>
+            <li><strong>Connect</strong> — Link nodes to build routing paths</li>
+            <li><strong>Send requests</strong> — Watch packets travel across the network with realistic latency</li>
+            <li><strong>Monitor</strong> — Track requests/sec, latency, packet loss, and node health</li>
+            <li><strong>Chaos mode</strong> — Randomly inject failures, latency spikes, and overloads</li>
+          </ul>
+        </div>
+
+        <div class="guide-section">
+          <h3>Controls</h3>
+          <ul>
+            <li><strong>Select tool</strong> — Click nodes to inspect. Drag to move. Drag empty space to pan.</li>
+            <li><strong>Connect tool</strong> — Click two nodes to link them</li>
+            <li><strong>Send request tool</strong> — Click source, then destination</li>
+            <li><strong>Mouse wheel</strong> — Zoom in/out</li>
+          </ul>
+        </div>
+
+        <div class="guide-section">
+          <h3>Visual feedback</h3>
+          <ul>
+            <li><strong>Pulsing glow</strong> — Ambient activity on healthy nodes</li>
+            <li><strong>Bright flash</strong> — Node sending or receiving a request</li>
+            <li><strong>Moving dots</strong> — Packets traveling between nodes</li>
+            <li><strong>Color rings</strong> — Node status (yellow = overloaded, red = failed)</li>
+          </ul>
+        </div>
+
+        <button class="btn btn-primary guide-start" id="guide-start">Start exploring</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
