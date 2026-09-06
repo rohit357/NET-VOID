@@ -1,4 +1,4 @@
-// VOIDNET — state module (nodes, links, requests, pathfinding, chaos)
+// NET-VOID — state module (nodes, links, requests, pathfinding, chaos)
 export class State {
   constructor() {
     this.nodes = [];

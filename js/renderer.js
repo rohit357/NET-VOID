@@ -1,4 +1,4 @@
-// VOIDNET — renderer (canvas drawing with zoom/pan)
+// NET-VOID — renderer (canvas drawing with zoom/pan)
 export class Renderer {
   constructor(canvas, ctx, state) {
     this.canvas = canvas;

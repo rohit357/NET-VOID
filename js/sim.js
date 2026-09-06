@@ -1,4 +1,4 @@
-// VOIDNET simulation engine: requests, packets, chaos, node lifecycle, metrics.
+// NET-VOID simulation engine: requests, packets, chaos, node lifecycle, metrics.
 import {
   state, TYPES, pushEvent, findPath, edgeLatency, nodeUp, failNode,
 } from './state.js';

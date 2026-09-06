@@ -1,4 +1,4 @@
-// VOIDNET — main entry point
+// NET-VOID — main entry point
 import { State } from './state.js?v=1.1';
 import { Renderer } from './renderer.js?v=1.1';
 import { UI } from './ui.js?v=1.1';

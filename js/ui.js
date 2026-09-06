@@ -1,4 +1,4 @@
-// VOIDNET — UI module (DOM controls, inspector, console, request log)
+// NET-VOID — UI module (DOM controls, inspector, console, request log)
 export class UI {
   constructor(state, renderer) {
     this.state = state;
@@ -244,14 +244,14 @@ export class UI {
 
     const closeGuide = () => {
       overlay.classList.add('hidden');
-      localStorage.setItem('voidnet-guide-seen', 'true');
+      localStorage.setItem('netvoid-guide-seen', 'true');
     };
 
     closeBtn.addEventListener('click', closeGuide);
     startBtn.addEventListener('click', closeGuide);
 
     // show guide on first visit
-    if (!localStorage.getItem('voidnet-guide-seen')) {
+    if (!localStorage.getItem('netvoid-guide-seen') && !localStorage.getItem('voidnet-guide-seen')) {
       overlay.classList.remove('hidden');
     } else {
       overlay.classList.add('hidden');

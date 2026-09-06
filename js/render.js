@@ -1,4 +1,4 @@
-// VOIDNET renderer: canvas drawing, force layout, camera (zoom/pan), hit testing.
+// NET-VOID renderer: canvas drawing, force layout, camera (zoom/pan), hit testing.
 import { state, TYPES, edgeLatency, nodeUp } from './state.js';
 
 export const camera = { x: 0, y: 0, scale: 1 };
